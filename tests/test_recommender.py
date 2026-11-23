@@ -66,7 +66,7 @@ from src.recommender import load_songs, score_song, recommend_songs
 
 def test_load_songs_converts_numbers():
     songs = load_songs("data/songs.csv")
-    assert len(songs) == 20
+    assert len(songs) == 40
     assert isinstance(songs[0]["energy"], float)
     assert isinstance(songs[0]["tempo_bpm"], float)
 
