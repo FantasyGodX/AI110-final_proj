@@ -1,180 +1,171 @@
-# 🎵 Music Recommender Simulation
+# 🎵 VibeFinder 2.0: Music Recommender
 
-## Project Summary
+VibeFinder is a small, explainable, content-based music recommender. It reads a 40-song catalog, compares every song to a user's taste profile, and prints the top matches with a plain-language reason for each score.
 
-In this project you will build and explain a small music recommender system.
-
-Your goal is to:
-
-- Represent songs and a user "taste profile" as data
-- Design a scoring rule that turns that data into recommendations
-- Evaluate what your system gets right and wrong
-- Reflect on how this mirrors real world AI recommenders
-
-My version is a small, CLI-first music recommender called **VibeFinder 1.0**. It reads a 20-song catalog from a CSV file, compares every song to a user's "taste profile" (favorite genre, favorite mood, and target energy), and prints the top 5 matches along with the reasons each song scored the way it did.
+**Version 1.0** (my earlier project) scored songs on three things: genre, mood, and energy, using exact label matching. I wrote down its weaknesses in its model card. **Version 2.0** is this final project, and it is built to fix those weaknesses and to measure whether the fixes actually helped.
 
 ---
 
-## How The System Works
+## What's new in 2.0
 
-### How real-world recommenders work
+| Weakness found in 1.0 | Change in 2.0 |
+|---|---|
+| Tempo, valence, danceability, and acousticness were loaded but never scored | All features can now be scored, whenever the user supplies a target for them |
+| "indie pop" got zero credit for being close to "pop" | Related genres and moods earn partial credit (genre and mood families) |
+| One fixed set of weights, edited by hand in code | Five named scoring modes: `classic`, `balanced`, `genre_first`, `mood_first`, `vibe_first` |
+| One artist or genre could fill the whole top 5 | Diversity re-ranker that penalizes repeated artists and genres |
+| Weak results were shown with the same confidence as strong ones | Confidence label, catalog-coverage notes, and per-feature mismatch warnings |
+| Most genres had one song | Catalog grown from 20 to 40 songs (every genre now has at least 2) |
+| Bad CSV rows or out-of-range inputs failed silently | Validation with clear error messages |
+| No way to tell if a change helped | `evaluate.py` compares configurations using hand-labelled relevant songs |
+| CLI only | Streamlit app (`app.py`) with sliders, mode picker, and a "why this song?" view |
 
-Big platforms like Spotify and YouTube mix two main ideas:
+The original recipe is still available as `classic` mode and reproduces every 1.0 score and ranking exactly (checked on the original 20 songs).
 
-- **Collaborative filtering** predicts what you'll like based on *other people's behavior*. If many users who liked the same songs as you also loved a track you haven't heard, it gets recommended to you. It needs lots of users, but it doesn't need to know anything about the music itself.
-- **Content-based filtering** predicts what you'll like based on *the attributes of the songs* (tempo, energy, mood, genre, acousticness). If you keep playing high-energy, upbeat tracks, it finds more tracks with similar attributes. It works for brand-new songs with no listening history.
+---
 
-The data behind these systems includes explicit signals (likes, saves, playlist adds), implicit signals (plays, skips, replays, how long you listened, time of day), and song attributes (genre, mood, tempo, energy, valence, audio analysis). Skips and replays are often more useful than likes because users produce far more of them.
+## How it works
 
-**My version is purely content-based.** There are no other users, so there's nothing to collaborate with. It prioritizes matching the *vibe* of a song to what the user says they want: genre first, then mood, then how close the song's energy is to the user's target energy.
+### Scoring
 
-### Features used
+For each song, the score is a weighted sum over the features the user supplied:
 
-**`Song`**: `id`, `title`, `artist`, `genre`, `mood`, `energy` (0-1), `tempo_bpm`, `valence` (0-1), `danceability` (0-1), `acousticness` (0-1). The scorer only uses genre, mood, and energy in version 1; the rest are loaded so they can be added later.
+- **Genre / mood:** full weight for an exact match; for modes with `similar_credit`, half weight if the labels are in the same family (for example `pop` / `indie pop` / `k-pop`, or `happy` / `joyful` / `euphoric`).
+- **Energy, valence, danceability, acousticness:** `weight * (1 - |song - target|)`. Closeness is rewarded, never "higher is better".
+- **Tempo:** same idea, with the gap capped at 60 BPM.
 
-**`UserProfile`** (a dict in `main.py`): `genre` (favorite genre), `mood` (favorite mood), `energy` (target energy, 0-1), and optionally `likes_acoustic`.
+| Mode | genre | mood | energy | valence | dance | acoustic | tempo | similar credit |
+|---|---|---|---|---|---|---|---|---|
+| classic (v1) | 2.0 | 1.0 | 1.0 | 0 | 0 | 0 | 0 | 0 |
+| balanced | 1.5 | 1.0 | 1.5 | 0.5 | 0.5 | 0.5 | 0.5 | 0.5 |
+| genre_first | 3.0 | 1.0 | 1.0 | 0.25 | 0.25 | 0.25 | 0.25 | 0.5 |
+| mood_first | 1.0 | 2.5 | 1.5 | 0.5 | 0.5 | 0.5 | 0.25 | 0.5 |
+| vibe_first | 0.5 | 1.0 | 2.0 | 1.0 | 1.0 | 1.0 | 0.5 | 0.5 |
 
-### Algorithm Recipe
+The maximum score depends on which fields the user filled in, so the output always shows `score / best possible`.
 
-For each song the score is the sum of:
+### Ranking and diversity
 
-| Rule | Points |
-|------|--------|
-| Genre matches the user's favorite genre | **+2.0** |
-| Mood matches the user's favorite mood | **+1.0** |
-| Energy similarity: `1.0 * (1 - abs(song.energy - user.energy))` | **0.0 to +1.0** |
+The scoring rule judges one song; the ranking rule runs it over the whole catalog and keeps the top K. With diversity above 0, songs are picked one at a time and each candidate loses `diversity × max score` for every artist already chosen and half that for every genre already chosen. Every penalty is printed in the explanation.
 
-Maximum score is 4.0. Energy uses *closeness* rather than "higher is better": a user who wants 0.4 energy should not be rewarded for a 0.95 song. Genre is worth more than mood because genre is a stronger boundary: people will skip a metal track on a jazz playlist even if the mood label fits, whereas mood overlaps more between genres.
+### Honesty features
 
-**Scoring Rule vs. Ranking Rule.** The scoring rule judges *one* song in isolation and returns a number plus reasons. The ranking rule runs the scoring rule over the *whole catalog*, sorts, and keeps the top K. You need both: a score alone doesn't tell you what to show, and a sort without a score has nothing to sort by.
+- **Confidence:** top score divided by best possible score. High is 75% or more, medium is 50% or more, low is below that.
+- **Coverage notes:** warns when the requested genre or mood is not in the catalog, or has only one song.
+- **Mismatch notes:** warns when the top pick is far (more than 0.4) from a numeric target, even if its total score is high.
 
 ### Data flow
 
 ```
-User prefs (genre, mood, energy)
+User prefs (genre, mood, energy, optional valence / danceability / acoustic / tempo)
+        |  validate + normalize
+        v
+For each song in songs.csv:  score_song(mode) -> (score, reasons)
         |
         v
-For each song in songs.csv:  score_song() -> (score, reasons)
+Rank by score  ->  optional diversity re-ranking
         |
         v
-Sort all (song, score, reasons) by score, descending
-        |
-        v
-Top K recommendations printed with explanations
+Top K + confidence + coverage + mismatch notes
 ```
-
-### Expected biases
-
-- **Genre dominates.** With +2.0 for genre, a mediocre song in the right genre can outrank a perfect mood/energy match in a different genre.
-- **Tiny catalog.** Most genres have just one song, so a user whose favorite genre is "metal" gets one genre match and then essentially energy-ranked filler.
-- **Exact-match labels.** "indie pop" gets no credit for being close to "pop", and "chill" gets no credit for being close to "relaxed".
-- **Ignored features.** Tempo, valence, danceability, and acousticness don't affect the score yet.
 
 ---
 
-## Getting Started
-
-### Setup
-
-1. Create a virtual environment (optional but recommended):
-
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate      # Mac or Linux
-   .venv\Scripts\activate         # Windows
-
-2. Install dependencies
+## Getting started
 
 ```bash
+python -m venv .venv
+.venv\Scripts\activate          # Windows   (source .venv/bin/activate on Mac/Linux)
 pip install -r requirements.txt
 ```
 
-3. Run the app:
-
-```bash
-python -m src.main
-```
-
-### Running Tests
-
-Run the starter tests with:
-
-```bash
-pytest
-```
-
-You can add more tests in `tests/test_recommender.py`.
+| Task | Command |
+|---|---|
+| Run all 10 profiles (balanced + diversity) | `python -m src.main` |
+| Reproduce the 1.0 behavior | `python -m src.main --mode classic` |
+| Try another mode | `python -m src.main --mode vibe_first --diversity 0.1` |
+| 1.0 weight-shift experiment | `python -m src.main --experiment` |
+| Compare configurations | `python -m src.evaluate --per-profile` |
+| Launch the web app | `streamlit run app.py` |
+| Run tests (36) | `pytest` |
 
 ---
 
-## Sample Recommendation Output
+## Evaluation
 
-Default "pop/happy" profile (`python -m src.main`):
+I wrote down, by hand and before running the scorers, which songs would be reasonable recommendations for each of 10 profiles (`src/profiles.py`). Then I measured each configuration against those sets.
+
+| Configuration | Precision@5 | Top-1 hit | Unique genres | Unique artists | Low-confidence profiles |
+|---|---|---|---|---|---|
+| v1 classic, 20 songs | 0.54 | 1.00 | 4.10 | 4.70 | 1 / 10 |
+| v1 classic, 40 songs | 0.70 | 1.00 | 3.30 | 4.10 | 1 / 10 |
+| balanced | **0.72** | 1.00 | 3.10 | 3.80 | 0 / 10 |
+| balanced + diversity | 0.70 | 1.00 | 3.50 | 4.20 | 0 / 10 |
+| genre_first | 0.68 | 1.00 | 2.70 | 3.60 | 1 / 10 |
+| mood_first | 0.66 | 1.00 | 4.00 | 4.40 | 0 / 10 |
+| vibe_first | 0.70 | 1.00 | 3.70 | 4.20 | 0 / 10 |
+
+What the numbers say:
+
+- **Most of the gain came from the catalog, not the algorithm.** Going from 20 to 40 songs moved precision from 0.54 to 0.70. The new scoring added only 0.02 on top, which is within what 10 profiles can resolve.
+- **The new features helped where the user supplied them.** "Quiet Acoustic Study" rose from 0.60 to 0.80 once acousticness and tempo could be scored. Version 1 could not use those inputs at all.
+- **Diversity is a trade.** It raised unique genres from 3.1 to 3.5 and unique artists from 3.8 to 4.2, and cost 0.02 precision.
+- **Top-1 hit is 1.00 for every configuration**, so it cannot tell them apart. The differences are in positions 2 to 5.
+
+Because the relevant sets are my own opinion and only 10 profiles were used, treat the small differences as suggestive, not proven.
+
+### Sample output (balanced + diversity)
 
 ```
-Profile: Default Pop/Happy  {'genre': 'pop', 'mood': 'happy', 'energy': 0.8}
-1. Sunrise City by Neon Echo  [pop/happy]
-   Score: 3.98 / 4.00
-     - genre match (+2.0)
+Profile: Conflicting: high energy + sad  {'genre': 'blues', 'mood': 'sad', 'energy': 0.9}
+1. Blue Monday Groove by The Brass Notes  [blues/sad]
+   Score: 3.22 / 4.00
+     - genre match (+1.5)
      - mood match (+1.0)
-     - energy 0.82 vs target 0.80 (+0.98)
-2. Gym Hero by Max Pulse  [pop/intense]
-   Score: 2.87 / 4.00
-     - genre match (+2.0)
-     - energy 0.93 vs target 0.80 (+0.87)
-3. Rooftop Lights by Indigo Parade  [indie pop/happy]
-   Score: 1.96 / 4.00
+     - energy 0.38 vs target 0.90 (+0.72)
+2. Static Heart by Hollow Verse  [rock/sad]
+   Score: 2.44 / 4.00
      - mood match (+1.0)
-     - energy 0.76 vs target 0.80 (+0.96)
-4. Salt & Sunday by Marisol Vega  [latin/joyful]
-   Score: 1.00 / 4.00
-     - energy 0.80 vs target 0.80 (+1.00)
-5. Concrete Crown by Tre Valdez  [hip hop/confident]
-   Score: 0.98 / 4.00
-     - energy 0.78 vs target 0.80 (+0.98)
+     - energy 0.86 vs target 0.90 (+1.44)
+...
+Confidence: high (80% of the best possible score)
+Note: top pick 'Blue Monday Groove' is far from your energy target (0.38 vs 0.90)
 ```
 
-The runner prints results for 7 profiles. See `model_card.md` for the rest.
-
-**Screenshot or video** *(optional)*: <!-- Insert a screenshot or demo video link here -->
-
----
-
-## Experiments You Tried
-
-### Experiment: weight shift
-
-I halved the genre weight (2.0 -> 1.0) and doubled the energy weight (1.0 -> 2.0), so the max score stays 4.0. Run it with `python -m src.main --experiment`.
-
-What changed:
-
-- **Default Pop/Happy:** "Gym Hero" (pop/intense) dropped from #2 to #3. "Rooftop Lights" (indie pop/happy) moved up to #2. That feels more right for a happy listener.
-- **Mid-everything (folk/relaxed/0.5):** the folk song "Porch Light Folk" fell from #1 to #3 because its energy (0.30) is far from 0.5. Two "relaxed" songs closer in energy took over.
-- **Conflicting (blues/sad/0.9):** the top song's score fell from 3.48 to 2.96 because the energy mismatch now hurts twice as much.
-- **Chill Lofi / Deep Rock:** top picks did not change.
-
-Verdict: the experiment made results *different*, and for pop/happy and folk/relaxed arguably *better*, because the system stopped treating genre as a wall. It also made it slightly easier for loud songs from the wrong genre to sneak in for the conflicting profile. Neither setting is "right"; it depends on whether the user cares more about genre or about feel.
-
-Other things I tried while testing: a genre that isn't in the catalog (`k-pop`), and a conflicting profile (high energy + sad).
+```
+Profile: Unknown genre (bossa nova)  {'genre': 'bossa nova', 'mood': 'relaxed', 'energy': 0.4}
+1. Coffee Shop Stories by Slow Stereo  [jazz/relaxed]
+...
+Confidence: medium (61% of the best possible score)
+Note: genre 'bossa nova' is not in the catalog, so no song can match it exactly
+```
 
 ---
 
-## Limitations and Risks
+## Limitations and risks
 
-- The catalog is tiny (20 songs). Most genres have exactly one song, so after the genre match the list fills up with songs ranked only by energy.
-- Genre and mood are exact-string matches. "indie pop" gets no credit for pop, and "relaxed" gets no credit for "chill".
-- Tempo, valence, danceability, and acousticness are loaded but never scored.
-- A strong genre match can bury better mood/energy matches. Gym Hero (pop, intense) shows up for "happy pop" fans just because it is pop and loud.
-- It has no idea what the user has already heard, and it has no other users to learn from.
+- **The catalog is still small and invented.** Forty songs with hand-picked labels reflect my opinions, not real listeners.
+- **Family credit can overreach.** For "Romantic Evening" (r&b), partial credit for the "urban" genre family let a hip-hop song into the top 5 even though it is not romantic.
+- **Partial credit raises confidence.** The bossa nova profile moved from "low" to "medium" confidence in balanced mode partly because related labels now earn points. That is arguably generous.
+- **Confidence is relative to the best possible score**, not a probability. A high confidence can still hide a big miss, which is why the mismatch warning exists.
+- **Weights are my opinion.** The mode tables were set by judgment, not learned from data.
+- **No listening history and no other users.** It cannot learn from skips or replays.
+- **Genre popularity is not modeled**, and the catalog is not balanced across cultures or languages.
 
 ---
 
-## Reflection
+## Project files
 
-Read and complete `model_card.md`:
+```
+app.py                  Streamlit app
+data/songs.csv          40-song catalog
+src/recommender.py      scoring, modes, diversity, confidence, validation
+src/main.py             CLI runner
+src/profiles.py         10 test profiles + hand-labelled relevant songs
+src/evaluate.py         configuration comparison
+tests/                  36 tests (v1 behavior preserved + all v2 features)
+model_card.md           intended use, data, evaluation, bias, reflection
+present.md              presentation notes
+```
 
-[**Model Card**](model_card.md)
-
-Building this showed me that a recommender is really just two small ideas: score one item, then sort everything by score. The "intelligence" is in the weights I picked, and those are my opinions. When I doubled the energy weight, the top songs changed without any new data, which means the person who sets the weights quietly decides what a "good" recommendation is. The reasons list was the most useful part: seeing "genre match (+2.0)" made it easy to spot why a song was ranked where it was.
-
-Bias shows up in the data and the rules. Mine only knows 20 songs and one label per genre, so someone who likes k-pop or metal gets worse results than someone who likes pop or lofi. In a real product the same thing would happen at scale: whoever is well represented in the data gets better recommendations. See [the model card](model_card.md) for the full write-up.
+See the [Model Card](model_card.md) for the full write-up.

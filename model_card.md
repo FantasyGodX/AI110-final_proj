@@ -1,278 +1,130 @@
-# 🎧 Model Card: Music Recommender Simulation
+# 🎧 Model Card: VibeFinder 2.0
 
 ## 1. Model Name
 
-**VibeFinder 1.0**
+**VibeFinder 2.0** (extends VibeFinder 1.0)
 
 ---
 
 ## 2. Goal / Intended Use
 
-VibeFinder suggests the top 5 songs from a small catalog that best match a user's favorite genre, favorite mood, and target energy level. It also explains each pick in plain words.
+VibeFinder suggests the top songs from a small catalog that best match a user's favorite genre, favorite mood, target energy, and optionally valence, danceability, acoustic preference, and tempo. It explains each pick in plain words and warns when its own answer is weak.
 
-It assumes the user can describe their taste with one genre, one mood, and one energy number. It is built for classroom exploration. It is **not** meant for real users or a real music app.
+It assumes the user can describe their taste with a few labels and numbers. It is built for classroom exploration and as a demonstration of how scoring rules shape recommendations. It is **not** meant for real users or a real music app.
 
-**Not intended for:** making decisions about real people, replacing a real streaming service, judging what music is "good", or any use where a wrong suggestion could cause harm.
+**Not intended for:** making decisions about real people, replacing a streaming service, judging what music is "good", or any use where a wrong suggestion could cause harm.
 
 ---
 
 ## 3. How the Model Works
 
-Every song gets points. The songs with the most points win.
+Every song earns points; the songs with the most points win.
 
-- **+2.0 points** if the song's genre is the user's favorite genre.
-- **+1.0 point** if the song's mood is the user's favorite mood.
-- **Up to +1.0 point for energy.** The closer the song's energy is to what the user wants, the more points. A song that matches exactly gets 1.0. A song that is as far away as possible gets 0. Higher energy is *not* automatically better. Closer is better.
+- **Genre and mood:** full weight for an exact match. In every mode except `classic`, a related label in the same family (for example `pop` and `k-pop`, or `sad` and `melancholy`) earns half the weight.
+- **Energy, valence, danceability, acousticness:** the closer the song is to the target, the more points. Higher is never automatically better.
+- **Tempo:** same idea, with the gap capped at 60 BPM.
+- **Only fields the user supplies are scored**, so a profile with just genre, mood, and energy is scored on three things.
 
-The top 5 scores are shown, with a list of reasons such as "genre match (+2.0)". The maximum possible score is 4.0.
+Five modes set the weights: `classic` (the 1.0 recipe), `balanced` (default), `genre_first`, `mood_first`, and `vibe_first`.
 
-I changed the starter logic by filling in the empty functions. I also added a `--experiment` switch that shifts the weights so I could test how sensitive the system is.
+After scoring, an optional diversity step picks songs one at a time and subtracts points for an artist or genre that has already been chosen.
+
+Finally, the system reports a **confidence** level (top score divided by the best possible score), **coverage notes** (the genre or mood is missing from the catalog), and **mismatch notes** (the top pick is far from a numeric target).
+
+### What changed from 1.0
+
+1. Scores all numeric features instead of only energy.
+2. Adds partial credit for related genres and moods.
+3. Adds modes, diversity re-ranking, confidence, coverage, and mismatch notes.
+4. Adds input validation for the catalog and for user preferences.
+5. Doubles the catalog and adds an evaluation script.
 
 ---
 
 ## 4. Data
 
-- **20 songs** in `data/songs.csv`. The starter had 10. I added 10 more.
-- **Genres:** pop, indie pop, lofi, rock, ambient, jazz, synthwave, r&b, country, hip hop, edm, classical, metal, latin, folk, blues, reggae. Lofi has 3 songs and pop has 2. Every other genre has 1.
-- **Moods:** happy, chill, intense, relaxed, moody, focused, romantic, nostalgic, confident, euphoric, serene, angry, joyful, melancholy, sad.
-- **Numbers per song:** energy, tempo, valence, danceability, acousticness (all 0 to 1 except tempo).
-- **Missing:** lyrics, language, artist popularity, release year, and anything about what real listeners do. Twenty songs is far too small to represent real taste. The labels were also picked by hand, so they reflect my opinions.
+- **40 songs** in `data/songs.csv`. Version 1 had 20; I added 20 more, so every genre now has at least two songs.
+- **Genres (18):** pop, indie pop, k-pop, lofi, rock, ambient, jazz, synthwave, r&b, country, hip hop, edm, classical, metal, latin, folk, blues, reggae.
+- **Moods (15):** happy, chill, intense, relaxed, moody, focused, romantic, nostalgic, confident, euphoric, serene, angry, joyful, melancholy, sad.
+- **Numbers per song:** energy, valence, danceability, acousticness (0 to 1) and tempo in BPM.
+- **Families:** the genre and mood families used for partial credit are my own groupings (for example, `country`, `folk`, and `blues` are "roots"). They are a judgment call, not a standard taxonomy.
+- **Missing:** lyrics, language, artist popularity, release year, and anything about real listener behavior. All songs and artists are invented, and the labels were assigned by hand.
 
 ---
 
 ## 5. Strengths
 
-- It works well for users whose taste matches a well-covered genre, like **lofi** or **rock**. The top results for "Chill Lofi" and "Deep Intense Rock" matched my intuition right away.
-- Rewarding *closeness* in energy works. A chill listener is not handed loud songs just because they have high energy numbers.
-- The reasons list makes every result easy to check. I could see exactly why each song was ranked.
-- When the genre isn't in the catalog (k-pop), it falls back to mood and energy and still gives sensible happy, mid-high energy songs.
+- It works well when the user's taste is well covered by the catalog. "Chill Lofi" reaches precision@5 of 1.00 in the balanced mode.
+- Supplying extra features actually changes results. "Quiet Acoustic Study" improved from 0.60 to 0.80 precision@5 when acousticness and tempo were scored.
+- The Gym Hero problem from 1.0 is reduced. For "Default Pop/Happy", Gym Hero (an intense workout song) moved from #3 to #5 because related happy songs (Rooftop Lights, Seoul Static) now earn partial genre credit.
+- The "conflicting" profile (sad, high energy, blues) now surfaces `Static Heart`, a sad rock song at 0.86 energy, as its #2 pick instead of a second quiet blues song.
+- Every score comes with its reasons, so any result can be checked by hand.
+- It tells the user when it is guessing (unknown genre) or when the top pick misses a target by a lot.
 
 ---
 
 ## 6. Limitations and Bias
 
-The system over-trusts genre. A genre match is worth 2.0 points, which is twice a mood match and more than the whole energy score. That means a song in the right genre can beat a song that is a much better match for the mood and energy. The clearest example is **Gym Hero**, an intense workout pop song. It keeps showing up for "happy pop" listeners because it gets the full +2.0 for being pop and loses almost nothing on energy. A happy pop fan probably wanted something sunnier. The catalog makes this worse: most genres have just one song, so users of those genres get one good result and then a list sorted only by energy. Finally, labels must match exactly, so "indie pop" gets no credit for being close to "pop".
+- **Catalog size beat algorithm design.** In my evaluation, doubling the catalog improved precision@5 from 0.54 to 0.70, but all the new scoring added only 0.02. The most important fix for 1.0 was more data, not smarter rules.
+- **Family credit over-reaches.** In "Romantic Evening," the "urban" genre family let `Concrete Crown` (hip hop, confident) reach the top 5 in balanced mode, though it is not a romantic song. Families are blunt tools.
+- **Partial credit can inflate confidence.** The bossa nova profile went from "low" confidence in classic mode to "medium" in balanced mode partly because related labels now earn points.
+- **Confidence is not a probability.** It is a ratio against the best possible score. The conflicting profile reads "high (80%)" even though the top pick's energy is 0.52 away from the target. The separate mismatch warning exists for this reason.
+- **Diversity costs relevance.** It improved variety (unique genres 3.1 to 3.5) but lowered precision@5 by 0.02, and it can push a relevant song out for a less relevant one from a new artist.
+- **The weights are my opinion.** Whoever chooses the weights decides what a "good" recommendation is. `genre_first` produced the least varied lists (2.7 unique genres) and `mood_first` the most (4.0).
+- **Under-represented tastes get worse results.** The catalog is built around Western-style genre labels and English-language titles. Someone who likes music outside those labels has to pick the nearest one.
+- **No personalization over time.** No listening history, skips, or other users.
 
 ---
 
 ## 7. Evaluation
 
-**Profiles tested (7):** Default Pop/Happy, High-Energy Pop, Chill Lofi, Deep Intense Rock, plus three edge cases: Conflicting (blues + sad + energy 0.9), Unknown genre (k-pop), and Mid-everything (folk + relaxed + energy 0.5). I looked for whether the top pick made sense and whether the same song kept showing up everywhere.
+**Method.** Ten profiles (src/profiles.py): four standard (pop/happy, high-energy pop, chill lofi, intense rock), three that use the extra features (acoustic study, workout EDM, romantic evening), and three edge cases (sad plus high energy, a genre not in the catalog, and a profile with mixed targets). For each profile I wrote a set of songs I would consider reasonable picks *before* running the scorers. Each configuration returns a top 5, and I measured precision@5, whether the #1 pick is in the set, the number of unique genres and artists in the list, and how many profiles were flagged low confidence.
 
-### Terminal output (top 5 per profile)
+| Configuration | P@5 | Top-1 | Genres | Artists | Low-conf |
+|---|---|---|---|---|---|
+| v1 classic, 20 songs | 0.54 | 1.00 | 4.10 | 4.70 | 1 / 10 |
+| v1 classic, 40 songs | 0.70 | 1.00 | 3.30 | 4.10 | 1 / 10 |
+| balanced | 0.72 | 1.00 | 3.10 | 3.80 | 0 / 10 |
+| balanced + diversity | 0.70 | 1.00 | 3.50 | 4.20 | 0 / 10 |
+| genre_first | 0.68 | 1.00 | 2.70 | 3.60 | 1 / 10 |
+| mood_first | 0.66 | 1.00 | 4.00 | 4.40 | 0 / 10 |
+| vibe_first | 0.70 | 1.00 | 3.70 | 4.20 | 0 / 10 |
 
-**Default Pop/Happy**
+**Reading the table**
 
-```
-Profile: Default Pop/Happy  {'genre': 'pop', 'mood': 'happy', 'energy': 0.8}
-1. Sunrise City by Neon Echo  [pop/happy]
-   Score: 3.98 / 4.00
-     - genre match (+2.0)
-     - mood match (+1.0)
-     - energy 0.82 vs target 0.80 (+0.98)
-2. Gym Hero by Max Pulse  [pop/intense]
-   Score: 2.87 / 4.00
-     - genre match (+2.0)
-     - energy 0.93 vs target 0.80 (+0.87)
-3. Rooftop Lights by Indigo Parade  [indie pop/happy]
-   Score: 1.96 / 4.00
-     - mood match (+1.0)
-     - energy 0.76 vs target 0.80 (+0.96)
-4. Salt & Sunday by Marisol Vega  [latin/joyful]
-   Score: 1.00 / 4.00
-     - energy 0.80 vs target 0.80 (+1.00)
-5. Concrete Crown by Tre Valdez  [hip hop/confident]
-   Score: 0.98 / 4.00
-     - energy 0.78 vs target 0.80 (+0.98)
-```
+- The 20-to-40-song jump is the biggest effect. The gap between `balanced` and `v1 classic, 40 songs` is 0.02, which is two songs across ten profiles, too small to call a real win.
+- Top-1 hit is 1.00 for all rows, so the first pick was never the problem. Improvements show up in positions 2 to 5.
+- No mode wins everywhere. "High-Energy Pop" scored 0.40 in balanced and 0.60 in `mood_first` and `vibe_first`, while "Mid-everything" scored 0.80 in balanced and 0.60 in the other two.
+- The "Conflicting" profile scored 0.40 in most modes and 0.20 in `genre_first`. No song is both sad and very loud and also blues, so the profile is partly unanswerable by design.
 
-**High-Energy Pop**
+**Limits of this evaluation.** The relevant sets are my own opinion, ten profiles is small, and I chose the profiles and the labels myself. The mode weights were set before I ran the evaluation and not tuned to its results, but I cannot rule out that my choice of profiles favors my own design.
 
-```
-Profile: High-Energy Pop  {'genre': 'pop', 'mood': 'intense', 'energy': 0.9}
-1. Gym Hero by Max Pulse  [pop/intense]
-   Score: 3.97 / 4.00
-     - genre match (+2.0)
-     - mood match (+1.0)
-     - energy 0.93 vs target 0.90 (+0.97)
-2. Sunrise City by Neon Echo  [pop/happy]
-   Score: 2.92 / 4.00
-     - genre match (+2.0)
-     - energy 0.82 vs target 0.90 (+0.92)
-3. Storm Runner by Voltline  [rock/intense]
-   Score: 1.99 / 4.00
-     - mood match (+1.0)
-     - energy 0.91 vs target 0.90 (+0.99)
-4. Neon Pulse by Kiko Strobe  [edm/euphoric]
-   Score: 0.94 / 4.00
-     - energy 0.96 vs target 0.90 (+0.94)
-5. Burn the Map by Ashgrid  [metal/angry]
-   Score: 0.93 / 4.00
-     - energy 0.97 vs target 0.90 (+0.93)
-```
+**Example before and after (Default Pop/Happy)**
 
-**Chill Lofi**
+- classic: Sunrise City, Pop Confetti, **Gym Hero**, Rooftop Lights, Seoul Static
+- balanced: Sunrise City, Pop Confetti, Rooftop Lights, Seoul Static, **Gym Hero**
 
-```
-Profile: Chill Lofi  {'genre': 'lofi', 'mood': 'chill', 'energy': 0.35}
-1. Library Rain by Paper Lanterns  [lofi/chill]
-   Score: 4.00 / 4.00
-     - genre match (+2.0)
-     - mood match (+1.0)
-     - energy 0.35 vs target 0.35 (+1.00)
-2. Midnight Coding by LoRoom  [lofi/chill]
-   Score: 3.93 / 4.00
-     - genre match (+2.0)
-     - mood match (+1.0)
-     - energy 0.42 vs target 0.35 (+0.93)
-3. Focus Flow by LoRoom  [lofi/focused]
-   Score: 2.95 / 4.00
-     - genre match (+2.0)
-     - energy 0.40 vs target 0.35 (+0.95)
-4. Spacewalk Thoughts by Orbit Bloom  [ambient/chill]
-   Score: 1.93 / 4.00
-     - mood match (+1.0)
-     - energy 0.28 vs target 0.35 (+0.93)
-5. Coffee Shop Stories by Slow Stereo  [jazz/relaxed]
-   Score: 0.98 / 4.00
-     - energy 0.37 vs target 0.35 (+0.98)
-```
-
-**Deep Intense Rock**
-
-```
-Profile: Deep Intense Rock  {'genre': 'rock', 'mood': 'intense', 'energy': 0.92}
-1. Storm Runner by Voltline  [rock/intense]
-   Score: 3.99 / 4.00
-     - genre match (+2.0)
-     - mood match (+1.0)
-     - energy 0.91 vs target 0.92 (+0.99)
-2. Gym Hero by Max Pulse  [pop/intense]
-   Score: 1.99 / 4.00
-     - mood match (+1.0)
-     - energy 0.93 vs target 0.92 (+0.99)
-3. Neon Pulse by Kiko Strobe  [edm/euphoric]
-   Score: 0.96 / 4.00
-     - energy 0.96 vs target 0.92 (+0.96)
-4. Burn the Map by Ashgrid  [metal/angry]
-   Score: 0.95 / 4.00
-     - energy 0.97 vs target 0.92 (+0.95)
-5. Sunrise City by Neon Echo  [pop/happy]
-   Score: 0.90 / 4.00
-     - energy 0.82 vs target 0.92 (+0.90)
-```
-
-**Conflicting: high energy + sad**
-
-```
-Profile: Conflicting: high energy + sad  {'genre': 'blues', 'mood': 'sad', 'energy': 0.9}
-1. Blue Monday Groove by The Brass Notes  [blues/sad]
-   Score: 3.48 / 4.00
-     - genre match (+2.0)
-     - mood match (+1.0)
-     - energy 0.38 vs target 0.90 (+0.48)
-2. Storm Runner by Voltline  [rock/intense]
-   Score: 0.99 / 4.00
-     - energy 0.91 vs target 0.90 (+0.99)
-3. Gym Hero by Max Pulse  [pop/intense]
-   Score: 0.97 / 4.00
-     - energy 0.93 vs target 0.90 (+0.97)
-4. Neon Pulse by Kiko Strobe  [edm/euphoric]
-   Score: 0.94 / 4.00
-     - energy 0.96 vs target 0.90 (+0.94)
-5. Burn the Map by Ashgrid  [metal/angry]
-   Score: 0.93 / 4.00
-     - energy 0.97 vs target 0.90 (+0.93)
-```
-
-**Unknown genre (k-pop)**
-
-```
-Profile: Unknown genre (k-pop)  {'genre': 'k-pop', 'mood': 'happy', 'energy': 0.7}
-1. Rooftop Lights by Indigo Parade  [indie pop/happy]
-   Score: 1.94 / 4.00
-     - mood match (+1.0)
-     - energy 0.76 vs target 0.70 (+0.94)
-2. Sunrise City by Neon Echo  [pop/happy]
-   Score: 1.88 / 4.00
-     - mood match (+1.0)
-     - energy 0.82 vs target 0.70 (+0.88)
-3. Night Drive Loop by Neon Echo  [synthwave/moody]
-   Score: 0.95 / 4.00
-     - energy 0.75 vs target 0.70 (+0.95)
-4. Concrete Crown by Tre Valdez  [hip hop/confident]
-   Score: 0.92 / 4.00
-     - energy 0.78 vs target 0.70 (+0.92)
-5. Salt & Sunday by Marisol Vega  [latin/joyful]
-   Score: 0.90 / 4.00
-     - energy 0.80 vs target 0.70 (+0.90)
-```
-
-**Mid-everything**
-
-```
-Profile: Mid-everything  {'genre': 'folk', 'mood': 'relaxed', 'energy': 0.5}
-1. Porch Light Folk by Willow Creek  [folk/melancholy]
-   Score: 2.80 / 4.00
-     - genre match (+2.0)
-     - energy 0.30 vs target 0.50 (+0.80)
-2. Island Drift by Coral Tide  [reggae/relaxed]
-   Score: 1.95 / 4.00
-     - mood match (+1.0)
-     - energy 0.55 vs target 0.50 (+0.95)
-3. Coffee Shop Stories by Slow Stereo  [jazz/relaxed]
-   Score: 1.87 / 4.00
-     - mood match (+1.0)
-     - energy 0.37 vs target 0.50 (+0.87)
-4. Dust Road Home by Hollow Pines  [country/nostalgic]
-   Score: 0.98 / 4.00
-     - energy 0.48 vs target 0.50 (+0.98)
-5. Velvet Hours by Sable June  [r&b/romantic]
-   Score: 0.95 / 4.00
-     - energy 0.55 vs target 0.50 (+0.95)
-```
-
-### What surprised me
-
-- **Gym Hero** appears for both "Default Pop/Happy" (#2) and "High-Energy Pop" (#1). For the second profile that is correct. For the first, it is a loud workout song showing up for someone who just wants happy pop. In plain words: the system sees "pop" and "high energy" and stops thinking. It does not know the song is about sweating at the gym, not smiling in the sun.
-- For the **conflicting** profile (sad but high energy), the system picked the one sad blues song and then dropped straight to loud songs that were not sad at all. There is no song that is both, so the system just splits the difference badly.
-- The **k-pop** profile had no genre match for any song, so the best score was only 1.94 out of 4. The system still returned results, but it gave no sign that it was guessing.
-
-### Why Gym Hero ranks #2 for Default Pop/Happy
-
-Sunrise City is #1 because it matches on genre (+2.0), mood (+1.0) and has nearly the same energy (+0.98). Gym Hero gets +2.0 for being pop and +0.87 for energy (0.93 vs 0.80), but no mood points. That adds to 2.87. The next best song, Rooftop Lights, matches the mood but not the genre label, so it only gets 1.96. Because the genre bonus is so big, Gym Hero beats a song that is a better emotional match.
-
-### Profile-pair comparisons
-
-- **Default Pop/Happy vs High-Energy Pop:** Both pick pop songs first, but the order flips. Happy wants Sunrise City on top. Intense wants Gym Hero on top. That makes sense, because the only difference is the mood (happy vs intense) and the energy target (0.8 vs 0.9). Rock and EDM songs also show up for the high-energy user, which is right for someone who wants intensity.
-- **Default Pop/Happy vs Chill Lofi:** Almost no overlap. Pop/happy returns bright, mid-high energy songs. Lofi returns quiet, acoustic songs like Library Rain and Midnight Coding. These two users want opposite things, and the system treats them that way.
-- **Chill Lofi vs Deep Intense Rock:** Complete opposites. Lofi's top 5 sits at energy 0.28 to 0.42, rock's top 5 sits at 0.82 to 0.97. The system correctly separates "calm study music" from "loud and aggressive".
-- **High-Energy Pop vs Deep Intense Rock:** They share Gym Hero and Storm Runner (both intense, both high energy), but swap order based on genre. Pop users get Gym Hero first, rock users get Storm Runner first. That is the genre weight doing exactly what it was designed to do.
-- **Deep Intense Rock vs Conflicting (blues/sad/0.9):** Both want very high energy, so after the top pick both lists fill up with loud songs like Gym Hero and Burn the Map. The #1 differs: Storm Runner (a real match) vs Blue Monday Groove (a low-energy song that wins on genre and mood alone, with a weak 0.48 energy score). The genre and mood bonuses can overpower the energy request.
-- **Chill Lofi vs Mid-everything (folk/relaxed/0.5):** Both are calm users, but Mid-everything has only one folk song, so after "Porch Light Folk" the list is made of relaxed songs from other genres like reggae and jazz. Lofi has three songs in its genre, so it gets a full, focused list. This shows the dataset is uneven, not that the logic is different.
-
-### Experiment: weight shift
-
-I halved the genre weight (2.0 to 1.0) and doubled the energy weight (1.0 to 2.0). Gym Hero fell from #2 to #3 for the Default profile, which felt more right. In the Mid-everything profile, the folk song dropped from #1 to #3 because its energy was off. So the change made results different, and for happy pop and relaxed folk arguably better. The math stays valid: the max score is still 4.0, since 1.0 + 1.0 + 2.0 = 4.0. Full details are in the README.
+**Verification.** `pytest` runs 36 tests. They cover version 1 compatibility (classic mode reproduces the 1.0 scores), each scoring component, input and catalog validation, diversity behavior, confidence, and the evaluation script. I also confirmed by hand that `classic` mode on the original 20 songs produces the same rankings and scores that were in the 1.0 model card.
 
 ---
 
 ## 8. Future Work
 
-- Score more features: valence, danceability, acousticness, and tempo, so "vibe" is more than three numbers.
-- Treat similar labels as partially matching (for example, "indie pop" is close to "pop", "chill" is close to "relaxed").
-- Add a diversity rule so the top 5 does not contain several songs from the same artist or genre.
-- Let users give more than one favorite genre or mood.
-- Tell the user when no song matched well, instead of presenting weak results with confidence.
+- Grow the catalog to hundreds of songs and add non-English and non-Western genres.
+- Replace hand-made families with similarity learned from audio features, so "close genre" is measured and not asserted.
+- Calibrate confidence against real user ratings instead of a score ratio.
+- Collect real listener feedback (likes and skips) to tune the weights and to test whether the hand-labelled relevant sets agree with other people.
+- Let a user pick several genres or moods, and add an "I've already heard this" memory.
+- Test the diversity penalty at other strengths and look for a better trade-off than a flat penalty.
 
 ---
 
 ## 9. Personal Reflection
 
-My biggest learning moment was the weight experiment. I did not add any songs or any new rules, but when I changed two numbers the top 5 lists changed. That showed me that a recommender is not neutral: whoever picks the weights is deciding what "good" means.
+The biggest lesson came from the evaluation, not from the code. I expected the new scoring rules to be the main improvement. When I separated the effects, most of the improvement came from simply having 40 songs instead of 20. The rules mattered mainly in specific cases: the Gym Hero fix, the acoustic profile that finally used its extra inputs, and the honest warnings. That made me more careful about claiming credit for a design change without a controlled comparison.
 
-AI tools helped me move quickly. They explained collaborative vs content-based filtering, suggested the closeness formula for energy (1 - abs(gap)), and helped me draft the code and tests. But I had to double-check them. The first version of my experiment flag had a broken string, and I only caught it by actually running the program. I also checked scores by hand for specific songs, because a number that looks plausible can still be wrong.
+I also learned that every "improvement" had a cost. Partial credit fixed Gym Hero, but it let a hip-hop song into a romantic list and made the system more confident than it arguably should be. Diversity gave more varied lists but lowered precision. A recommender is a set of trade-offs, and the person who picks the weights decides which ones to accept.
 
-What surprised me most is how real a simple system can feel. With only three rules, "Chill Lofi" gives a believable study playlist. It is easy to forget that nothing is being understood: the program is just adding up points. That also helped me see why real recommendation apps can feel smart while still making weird choices, like Gym Hero for happy pop fans.
+The honesty features changed how I think about the output. Version 1 presented a weak list in the same format as a strong one. Adding a confidence label and the "top pick is far from your energy target" warning showed me that a high score can hide a large miss, and that a system should say when it is guessing.
 
-If I extended this project, I would add the unused features (valence, danceability, acousticness), use partial credit for similar genres and moods, add a diversity penalty, and grow the catalog to a few hundred songs so that no genre depends on a single track.
+If I continued, I would get real listener judgments to replace my own labels, since my relevant sets are the weakest part of the evaluation.
