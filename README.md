@@ -1,171 +1,200 @@
-# 🎵 VibeFinder 2.0: Music Recommender
+# 🎵 VibeFinder 2.0: Ask-in-Plain-Words Music Recommender
 
-VibeFinder is a small, explainable, content-based music recommender. It reads a 40-song catalog, compares every song to a user's taste profile, and prints the top matches with a plain-language reason for each score.
+VibeFinder turns a sentence like *"something calm to study to late at night"* into a ranked, explained list of songs. It retrieves matching knowledge (genre, mood and listening-situation descriptions), builds a taste profile from what it retrieved, scores a song catalog, **checks its own result**, revises if the check fails, and shows every step it took.
 
-**Version 1.0** (my earlier project) scored songs on three things: genre, mood, and energy, using exact label matching. I wrote down its weaknesses in its model card. **Version 2.0** is this final project, and it is built to fix those weaknesses and to measure whether the fixes actually helped.
+## Original project
+
+This is an extension of my **Module 3 project, the Music Recommender Simulation (VibeFinder 1.0)**. Version 1.0 read a 20-song CSV, compared each song to a hand-written taste profile (favorite genre, favorite mood, target energy), and printed the top 5 with a reason for each score. It used exact label matching and ignored tempo, valence, danceability, and acousticness. Its own model card listed these weaknesses, and 2.0 addresses them.
+
+## Why it matters
+
+A recommender that returns a list without saying how sure it is, or what it based the list on, cannot be trusted or debugged. VibeFinder 2.0 is built around three habits: show the evidence (retrieved documents and per-feature score reasons), check the result before presenting it, and say so when it is guessing or when the request contradicts itself.
 
 ---
 
-## What's new in 2.0
+## Architecture overview
 
-| Weakness found in 1.0 | Change in 2.0 |
+The diagram source is in [diagrams/architecture.mmd](diagrams/architecture.mmd).
+
+```mermaid
+flowchart TD
+    U(["User request<br/>plain language, or genre, mood and sliders"]) --> G{{"Guardrails<br/>empty, too long, wrong type, invalid k"}}
+    G -->|rejected| R1(["Clear message, nothing is guessed"])
+    G -->|accepted| RET["Retriever<br/>TF-IDF search"]
+    KB[("Knowledge base<br/>18 genre docs, 15 mood docs, 15 listening scenarios")] --> RET
+    CAT[("Song catalog<br/>40 songs")] -.->|computes genre and mood targets| KB
+    RET -->|nothing relevant| R2(["Ask the user to clarify"])
+    RET -->|top documents| CF{"Do the strongest sources conflict?"}
+    CF -->|yes| ONE["Keep only the best-matching document"]
+    CF -->|no| PROF
+    ONE --> PROF["Build taste profile from retrieved documents"]
+    PROF --> REC["Recommender<br/>scores 7 features, partial credit, diversity re-rank"]
+    CAT --> REC
+    REC --> CHK{"Self-check<br/>confidence, feature mismatch, repeated artist, k songs"}
+    CHK -->|pass| OUT
+    CHK -->|fail| REV["Revise strategy<br/>next mode, more diversity, drop genre guess"]
+    REV -->|max 3 attempts| REC
+    CHK -->|attempts used up| OUT
+    OUT(["Answer: recommendations, cited documents,<br/>score reasons, confidence, notes"])
+    OUT --> H[/"Human review<br/>read the trace and notes. Status needs_review asks for it"/]
+```
+
+**How data flows.** A request is checked by the guardrails, then the **retriever** searches a knowledge base of 48 documents. The retrieved documents *build* the taste profile: genre and mood come from weighted votes, and numeric targets (energy, valence, danceability, acousticness, tempo) are relevance-weighted averages of the documents' targets. Different requests therefore produce different profiles and different lists. The **recommender** scores all 40 songs against the profile. The **self-check** tests the result; if it fails, the agent tries the next strategy (up to 3 attempts) and keeps the best attempt. If retrieval finds nothing relevant, the agent asks for clarification instead of guessing. If the strongest sources disagree (for example "calm" plus "workout"), it follows only the best match and flags the result for human review.
+
+**Where humans and tests check the system.** A person reads the trace and notes (and `needs_review` asks for that). The 73 automated tests, the two evaluation scripts, and my hand-labelled relevant songs and documents act as external checks.
+
+### Components
+
+| File | Role |
 |---|---|
-| Tempo, valence, danceability, and acousticness were loaded but never scored | All features can now be scored, whenever the user supplies a target for them |
-| "indie pop" got zero credit for being close to "pop" | Related genres and moods earn partial credit (genre and mood families) |
-| One fixed set of weights, edited by hand in code | Five named scoring modes: `classic`, `balanced`, `genre_first`, `mood_first`, `vibe_first` |
-| One artist or genre could fill the whole top 5 | Diversity re-ranker that penalizes repeated artists and genres |
-| Weak results were shown with the same confidence as strong ones | Confidence label, catalog-coverage notes, and per-feature mismatch warnings |
-| Most genres had one song | Catalog grown from 20 to 40 songs (every genre now has at least 2) |
-| Bad CSV rows or out-of-range inputs failed silently | Validation with clear error messages |
-| No way to tell if a change helped | `evaluate.py` compares configurations using hand-labelled relevant songs |
-| CLI only | Streamlit app (`app.py`) with sliders, mode picker, and a "why this song?" view |
-
-The original recipe is still available as `classic` mode and reproduces every 1.0 score and ranking exactly (checked on the original 20 songs).
+| `src/retriever.py` | Loads the knowledge base and runs TF-IDF retrieval (pure Python, no API key) |
+| `src/agent.py` | Guardrails, retrieval, profile building, check and revise loop, answer text |
+| `src/recommender.py` | Scoring (7 features), 5 modes, partial credit, diversity, confidence, validation |
+| `src/log_setup.py` | Logging to `logs/vibefinder.log` |
+| `src/evaluate_agent.py` | Retrieval, paraphrase, conflict and guardrail evaluation |
+| `src/evaluate.py`, `src/profiles.py` | Version 1 vs 2 comparison with hand-labelled relevant songs |
+| `src/main.py` | CLI for the profile-based recommender |
+| `app.py` | Streamlit app: "Ask in plain words" tab and "Pick your taste" tab |
+| `data/songs.csv`, `data/knowledge_base.json` | 40 songs, 18 genre + 15 mood + 15 scenario documents |
 
 ---
 
-## How it works
+## Setup instructions
 
-### Scoring
-
-For each song, the score is a weighted sum over the features the user supplied:
-
-- **Genre / mood:** full weight for an exact match; for modes with `similar_credit`, half weight if the labels are in the same family (for example `pop` / `indie pop` / `k-pop`, or `happy` / `joyful` / `euphoric`).
-- **Energy, valence, danceability, acousticness:** `weight * (1 - |song - target|)`. Closeness is rewarded, never "higher is better".
-- **Tempo:** same idea, with the gap capped at 60 BPM.
-
-| Mode | genre | mood | energy | valence | dance | acoustic | tempo | similar credit |
-|---|---|---|---|---|---|---|---|---|
-| classic (v1) | 2.0 | 1.0 | 1.0 | 0 | 0 | 0 | 0 | 0 |
-| balanced | 1.5 | 1.0 | 1.5 | 0.5 | 0.5 | 0.5 | 0.5 | 0.5 |
-| genre_first | 3.0 | 1.0 | 1.0 | 0.25 | 0.25 | 0.25 | 0.25 | 0.5 |
-| mood_first | 1.0 | 2.5 | 1.5 | 0.5 | 0.5 | 0.5 | 0.25 | 0.5 |
-| vibe_first | 0.5 | 1.0 | 2.0 | 1.0 | 1.0 | 1.0 | 0.5 | 0.5 |
-
-The maximum score depends on which fields the user filled in, so the output always shows `score / best possible`.
-
-### Ranking and diversity
-
-The scoring rule judges one song; the ranking rule runs it over the whole catalog and keeps the top K. With diversity above 0, songs are picked one at a time and each candidate loses `diversity × max score` for every artist already chosen and half that for every genre already chosen. Every penalty is printed in the explanation.
-
-### Honesty features
-
-- **Confidence:** top score divided by best possible score. High is 75% or more, medium is 50% or more, low is below that.
-- **Coverage notes:** warns when the requested genre or mood is not in the catalog, or has only one song.
-- **Mismatch notes:** warns when the top pick is far (more than 0.4) from a numeric target, even if its total score is high.
-
-### Data flow
-
-```
-User prefs (genre, mood, energy, optional valence / danceability / acoustic / tempo)
-        |  validate + normalize
-        v
-For each song in songs.csv:  score_song(mode) -> (score, reasons)
-        |
-        v
-Rank by score  ->  optional diversity re-ranking
-        |
-        v
-Top K + confidence + coverage + mismatch notes
-```
-
----
-
-## Getting started
+Requires Python 3.10 or newer. Nothing needs an account, API key, or internet connection.
 
 ```bash
+git clone https://github.com/FantasyGodX/AI110-final_proj.git
+cd AI110-final_proj
 python -m venv .venv
-.venv\Scripts\activate          # Windows   (source .venv/bin/activate on Mac/Linux)
+.venv\Scripts\activate            # Windows   (source .venv/bin/activate on Mac/Linux)
 pip install -r requirements.txt
+pytest                            # expect: 73 passed
 ```
 
 | Task | Command |
 |---|---|
-| Run all 10 profiles (balanced + diversity) | `python -m src.main` |
-| Reproduce the 1.0 behavior | `python -m src.main --mode classic` |
-| Try another mode | `python -m src.main --mode vibe_first --diversity 0.1` |
-| 1.0 weight-shift experiment | `python -m src.main --experiment` |
-| Compare configurations | `python -m src.evaluate --per-profile` |
-| Launch the web app | `streamlit run app.py` |
-| Run tests (36) | `pytest` |
+| Ask in plain words | `python -m src.agent "something calm to study to late at night"` |
+| Same, without the trace | `python -m src.agent "gym workout music" --no-trace` |
+| Web app | `streamlit run app.py` |
+| Run all 10 profiles (v2) | `python -m src.main` |
+| Reproduce v1 behavior | `python -m src.main --mode classic` |
+| Evaluate retrieval, agent, guardrails | `python -m src.evaluate_agent --write assets/evaluation_results.md` |
+| Compare v1 and v2 | `python -m src.evaluate --per-profile` |
+
+Exit codes for `src.agent`: 0 = recommendations returned, 2 = request rejected or needs clarification, 1 = data files could not be loaded. Every step is appended to `logs/vibefinder.log`.
 
 ---
 
-## Evaluation
+## Sample interactions
 
-I wrote down, by hand and before running the scorers, which songs would be reasonable recommendations for each of 10 profiles (`src/profiles.py`). Then I measured each configuration against those sets.
+Full captured output is in [assets/sample_runs.md](assets/sample_runs.md) (reproducible with the commands shown there). Excerpts:
 
-| Configuration | Precision@5 | Top-1 hit | Unique genres | Unique artists | Low-confidence profiles |
-|---|---|---|---|---|---|
-| v1 classic, 20 songs | 0.54 | 1.00 | 4.10 | 4.70 | 1 / 10 |
-| v1 classic, 40 songs | 0.70 | 1.00 | 3.30 | 4.10 | 1 / 10 |
-| balanced | **0.72** | 1.00 | 3.10 | 3.80 | 0 / 10 |
-| balanced + diversity | 0.70 | 1.00 | 3.50 | 4.20 | 0 / 10 |
-| genre_first | 0.68 | 1.00 | 2.70 | 3.60 | 1 / 10 |
-| mood_first | 0.66 | 1.00 | 4.00 | 4.40 | 0 / 10 |
-| vibe_first | 0.70 | 1.00 | 3.70 | 4.20 | 0 / 10 |
+**1. A normal request. The check fails once, the agent revises, then it passes.**
 
-What the numbers say:
+```text
+$ python -m src.agent "something calm to study to late at night"
+Status: ok
+For "something calm to study to late at night" I retrieved 'Studying' (scenario), 'Relaxed' (mood), 'Meditation and yoga' (scenario). From that I aimed for genre 'ambient', mood 'focused', energy around 0.30, tempo near 74 BPM. My top pick is 'Focus Flow' by LoRoom. Confidence: high (92%).
 
-- **Most of the gain came from the catalog, not the algorithm.** Going from 20 to 40 songs moved precision from 0.54 to 0.70. The new scoring added only 0.02 on top, which is within what 10 profiles can resolve.
-- **The new features helped where the user supplied them.** "Quiet Acoustic Study" rose from 0.60 to 0.80 once acousticness and tempo could be scored. Version 1 could not use those inputs at all.
-- **Diversity is a trade.** It raised unique genres from 3.1 to 3.5 and unique artists from 3.8 to 4.2, and cost 0.02 precision.
-- **Top-1 hit is 1.00 for every configuration**, so it cannot tell them apart. The differences are in positions 2 to 5.
+Agent trace:
+  [guard] accepted query (40 chars): 'something calm to study to late at night'
+  [retrieve] scenario:study (0.42); mood:relaxed (0.24); scenario:meditation (0.15)
+  [profile] built from retrieved documents: {'genre': 'ambient', 'mood': 'focused', 'energy': 0.3, 'valence': 0.57, 'danceability': 0.6, 'acousticness': 0.79, 'tempo_bpm': 74}
+  [attempt 1] mode=balanced diversity=0.1 genre=kept -> confidence high (86%); failed: no repeated artist
+  [revise] trying a different strategy because: no repeated artist
+  [attempt 2] mode=vibe_first diversity=0.15 genre=kept -> confidence high (92%); all checks passed
+  [final] chose attempt 2 (vibe_first); status=ok
 
-Because the relevant sets are my own opinion and only 10 profiles were used, treat the small differences as suggestive, not proven.
-
-### Sample output (balanced + diversity)
-
-```
-Profile: Conflicting: high energy + sad  {'genre': 'blues', 'mood': 'sad', 'energy': 0.9}
-1. Blue Monday Groove by The Brass Notes  [blues/sad]
-   Score: 3.22 / 4.00
-     - genre match (+1.5)
-     - mood match (+1.0)
-     - energy 0.38 vs target 0.90 (+0.72)
-2. Static Heart by Hollow Verse  [rock/sad]
-   Score: 2.44 / 4.00
-     - mood match (+1.0)
-     - energy 0.86 vs target 0.90 (+1.44)
-...
-Confidence: high (80% of the best possible score)
-Note: top pick 'Blue Monday Groove' is far from your energy target (0.38 vs 0.90)
+1. Focus Flow by LoRoom  [lofi/focused]  score 6.47 / 7.00
+     supported by retrieved: Studying
+2. Spacewalk Thoughts by Orbit Bloom  [ambient/chill]  score 5.94 / 7.00
+     supported by retrieved: Studying, Meditation and yoga
 ```
 
+**2. A contradictory request. The agent notices and flags it instead of averaging it away.**
+
+```text
+$ python -m src.agent "calm and peaceful but also super high energy workout"
+Status: needs_review
+  [retrieve] mood:serene (0.23); scenario:workout (0.22); mood:relaxed (0.20)
+  [conflict] the request mixes conflicting signals: 'Serene' targets energy 0.21 but 'Workout' targets 0.92; using only the best match 'Serene'
+1. Daybreak Choir by Orbit Bloom  [ambient/serene]  score 4.41 / 4.50
+Note: the request mixes conflicting signals: 'Serene' targets energy 0.21 but 'Workout' targets 0.92; I followed 'Serene' and ignored the rest
 ```
-Profile: Unknown genre (bossa nova)  {'genre': 'bossa nova', 'mood': 'relaxed', 'energy': 0.4}
-1. Coffee Shop Stories by Slow Stereo  [jazz/relaxed]
-...
-Confidence: medium (61% of the best possible score)
-Note: genre 'bossa nova' is not in the catalog, so no song can match it exactly
+
+**3. Input it cannot use. It asks instead of guessing.**
+
+```text
+$ python -m src.agent "asdfgh qwerty zxcv"
+Status: needs_clarification
+I could not match that to any genre, mood, or listening situation. Try describing an activity (studying, workout, road trip), a mood (sad, happy, calm), or a genre (jazz, lofi, k-pop).
+
+$ python -m src.agent ""
+Status: rejected
+Request rejected: the request is empty; describe what you want to listen to.
 ```
 
 ---
 
-## Limitations and risks
+## Design decisions and trade-offs
 
-- **The catalog is still small and invented.** Forty songs with hand-picked labels reflect my opinions, not real listeners.
-- **Family credit can overreach.** For "Romantic Evening" (r&b), partial credit for the "urban" genre family let a hip-hop song into the top 5 even though it is not romantic.
-- **Partial credit raises confidence.** The bossa nova profile moved from "low" to "medium" confidence in balanced mode partly because related labels now earn points. That is arguably generous.
-- **Confidence is relative to the best possible score**, not a probability. A high confidence can still hide a big miss, which is why the mismatch warning exists.
-- **Weights are my opinion.** The mode tables were set by judgment, not learned from data.
-- **No listening history and no other users.** It cannot learn from skips or replays.
-- **Genre popularity is not modeled**, and the catalog is not balanced across cultures or languages.
+- **Retrieval builds the profile, not just decorates the answer.** The profile's genre, mood, and numeric targets are computed from the retrieved documents. A test confirms "study" and "workout" produce different profiles and non-overlapping lists.
+- **Pure-Python TF-IDF instead of a hosted model or embeddings.** It runs offline, needs no key, and gives identical results on every run, which makes the evaluation reproducible. The cost: it only matches words it has seen. "Música para estudiar" gets a clarification request, and "ocean waves" missed the beach document. A real deployment would likely use embeddings.
+- **Genre and mood targets come from the catalog; scenario targets are my judgment.** That keeps genre numbers honest, but the 15 scenarios (for example "study = energy 0.30") are my opinion.
+- **Self-check with bounded revision.** The agent tries at most 3 strategies and keeps the best, so it can never loop forever. Checks: confidence at least medium, no big feature mismatch on the top pick, no repeated artist, and k songs returned.
+- **I changed a parameter after seeing the evaluation.** The first attempt originally used diversity 0.05, and the "no repeated artist" check failed on 17 of 20 queries, so "revision" was mostly a diversity bump. I raised the starting value to 0.10. It still triggers on 12 of 20 queries, so the revision loop is real but is mostly a diversity retry on ordinary requests.
+- **Conflict detection fails safe, not smart.** When sources disagree, the agent follows the best-scoring document and sets `needs_review`. With a near-tie it is effectively arbitrary, which is why it asks a human to look.
+- **Kept `classic` mode** so version 1 behavior can be reproduced and compared. It reproduces every 1.0 score exactly on the original 20 songs.
+- **Catalog doubled to 40 songs.** This turned out to be the biggest single quality gain (see Testing).
 
 ---
+
+## Testing summary
+
+**73 automated tests pass** (6 from version 1, 30 for the 2.0 scoring, 37 for retrieval, the agent, guardrails, and logging). Output: [assets/test_output.txt](assets/test_output.txt).
+
+Structured experiments, generated by `python -m src.evaluate_agent` ([assets/evaluation_results.md](assets/evaluation_results.md)):
+
+| Experiment | Result |
+|---|---|
+| Retrieval accuracy (20 queries, labels written by me) | Top-1 **90%** (18/20), top-3 **100%** (20/20) |
+| Paraphrase stability (4 groups x 3 wordings) | Mean top-5 overlap **0.84**. Study and workout 1.00, sleep 0.78, party 0.59 |
+| Repeatability (same query 5 times) | Identical every time |
+| Agent on the 20 queries | 19 `ok`, 1 `needs_review` (a false alarm), 12 revised and all 12 recovered |
+| Contradictory requests (4) | **4/4** flagged `needs_review` |
+| Guardrails (12 bad inputs) | **12/12** handled without a crash |
+
+Version 1 vs 2 on 10 profiles ([assets/v1_vs_v2_evaluation.txt](assets/v1_vs_v2_evaluation.txt)): precision@5 went from 0.54 (v1, 20 songs) to 0.70 (v1, 40 songs) to 0.72 (balanced). **Most of the gain came from the bigger catalog, not the new scoring (+0.02).**
+
+**What worked:** retrieval on clear requests, guardrails, conflict detection, and the visible trace.
+
+**What did not:**
+- Two retrieval misses: "driving across the country" matched the *country* genre, and "sunshine and ocean waves" matched reggae before beach.
+- One false conflict flag: "taking the train to work" matched the workout document because "train" and "training" share a stem.
+- Paraphrase stability on "party" is only 0.59.
+- **Confidence is not discriminating.** All 20 queries scored "high". It measures fit to the profile the agent built, not to what you meant, so a flagged conflicting request can still read "high (98%)". The `needs_review` status carries the warning, not the confidence number.
+
+**What I learned:** the test I trusted least (the evaluation) taught me the most. It showed that a check failing 85% of the time was a miscalibrated default, that contradiction was being silently averaged away, and that the catalog size mattered more than the clever rules.
+
+Limits of the evaluation: I wrote the queries, the "right document" labels, and the contradictory examples, and the contradictory examples were written after I understood how the detector works. Twenty queries is small.
+
+---
+
+## Reflection
+
+Building this taught me that the hard part of a reliable system is not producing an answer but deciding when not to trust it. Retrieval made the system's inputs inspectable, the check-and-revise loop made its output testable, and the evaluation showed me where my own assumptions were wrong. The full reflection (limitations, misuse, surprises, and collaboration) is in [model_card.md](model_card.md).
 
 ## Project files
 
 ```
-app.py                  Streamlit app
-data/songs.csv          40-song catalog
-src/recommender.py      scoring, modes, diversity, confidence, validation
-src/main.py             CLI runner
-src/profiles.py         10 test profiles + hand-labelled relevant songs
-src/evaluate.py         configuration comparison
-tests/                  36 tests (v1 behavior preserved + all v2 features)
-model_card.md           intended use, data, evaluation, bias, reflection
-present.md              presentation notes
+app.py                        Streamlit app
+data/songs.csv                40-song catalog
+data/knowledge_base.json      genre, mood and scenario documents
+diagrams/architecture.mmd     system diagram (Mermaid source)
+assets/                       captured outputs: sample runs, tests, evaluations, log
+src/                          retriever, agent, recommender, evaluation, logging, CLI
+tests/                        73 tests
+model_card.md                 intended use, evaluation, limitations, ethics, reflection
+present.md                    presentation notes
 ```
-
-See the [Model Card](model_card.md) for the full write-up.
