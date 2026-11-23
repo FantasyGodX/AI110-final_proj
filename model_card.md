@@ -126,9 +126,8 @@ Ten profiles with my hand-labelled "reasonable songs". Precision@5: **0.54** (v1
 
 ## 10. Collaboration
 
-<!-- REVIEW BEFORE SUBMITTING: this section records what happened during the project. Edit the first-person statements so they match your own decisions and what you actually reviewed. -->
 
-I built this project with an AI coding assistant (Claude Code) working in my repository, and that is part of how the work was produced. Below is what happened with specific suggestions. The assistant wrote most of the code and drafts; the design direction, the test inputs I chose to trust, and the final decision about what to submit are mine.
+I built this project with an AI coding assistant (Claude Code) working in my repository, and that is part of how the work was produced. The assistant wrote most of the code and first drafts. I set the scope (extend my Module 3 recommender to meet the final project requirements) and made the final call on each suggestion below.
 
 **A suggestion I accepted: separate the effect of the bigger catalog from the effect of the new scoring.** The assistant proposed evaluating the original recipe on both the 20-song and 40-song catalogs, instead of only comparing version 1 to version 2. I accepted it because it could change my conclusion, and it did: most of the improvement came from the data, not the new rules. Without that comparison the README would have credited the algorithm for a gain that came from more songs.
 
@@ -138,7 +137,7 @@ I built this project with an AI coding assistant (Claude Code) working in my rep
 
 **Also changed after testing:** the assistant's first attempt used a starting diversity of 0.05. When my evaluation showed the repeated-artist check failing on 17 of 20 queries, I raised it. I also note that this means that value was tuned to my own test set.
 
-**What I verified myself:** I ran the full test suite and the evaluation scripts, read the sample outputs, and checked that version 1's scores are reproduced exactly by `classic` mode on the original 20 songs. I did not verify the Mermaid diagram by rendering it in this environment, only by keeping its syntax simple.
+**How the work was verified:** the full test suite and both evaluation scripts were run, and their raw outputs are saved in `assets/` so anyone can compare them with a fresh run. `classic` mode was checked against the version 1 scores on the original 20 songs. One thing was not verified: the Mermaid diagram was not rendered in the environment where it was written, so its syntax was kept simple.
 
 ---
 

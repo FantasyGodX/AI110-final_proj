@@ -182,7 +182,7 @@ That the bigger catalog beat all my new rules, and that a check failing 85 perce
 Embeddings or synonyms so "ocean waves" and other languages work, ask the user when two sources tie, calibrate confidence against real ratings, and have other people label my test sets.
 
 **How did you work on this?**
-I used an AI coding assistant for much of the implementation, and the model card (section 10) describes one suggestion I accepted, one I changed, and one I did not adopt. *(Edit this answer to match your own account.)*
+I used an AI coding assistant for much of the implementation, and the model card (section 10) describes one suggestion I accepted, one I changed, and one I did not adopt.
 
 ---
 
