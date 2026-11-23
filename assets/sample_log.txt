@@ -1,0 +1,18 @@
+2026-11-23 17:52:07,083 INFO    guard | accepted query (40 chars): 'something calm to study to late at night'
+2026-11-23 17:52:07,083 INFO    retrieve | scenario:study (0.42); mood:relaxed (0.24); scenario:meditation (0.15)
+2026-11-23 17:52:07,083 INFO    profile | built from retrieved documents: {'genre': 'ambient', 'mood': 'focused', 'energy': 0.3, 'valence': 0.57, 'danceability': 0.6, 'acousticness': 0.79, 'tempo_bpm': 74}
+2026-11-23 17:52:07,083 INFO    attempt 1 | mode=balanced diversity=0.1 genre=kept -> confidence high (86%); failed: no repeated artist
+2026-11-23 17:52:07,083 INFO    revise | trying a different strategy because: no repeated artist
+2026-11-23 17:52:07,084 INFO    attempt 2 | mode=vibe_first diversity=0.15 genre=kept -> confidence high (92%); all checks passed
+2026-11-23 17:52:07,084 INFO    final | chose attempt 2 (vibe_first); status=ok
+2026-11-23 17:52:07,204 INFO    guard | accepted query (52 chars): 'calm and peaceful but also super high energy workout'
+2026-11-23 17:52:07,204 INFO    retrieve | mood:serene (0.23); scenario:workout (0.22); mood:relaxed (0.20)
+2026-11-23 17:52:07,204 INFO    conflict | the request mixes conflicting signals: 'Serene' targets energy 0.21 but 'Workout' targets 0.92; using only the best match 'Serene'
+2026-11-23 17:52:07,204 WARNING conflicting retrieval for query 'calm and peaceful but also super high energy workout': the request mixes conflicting signals: 'Serene' targets energy 0.21 but 'Workout' targets 0.92
+2026-11-23 17:52:07,204 INFO    profile | built from retrieved documents: {'mood': 'serene', 'energy': 0.21, 'valence': 0.53, 'danceability': 0.28, 'acousticness': 0.95, 'tempo_bpm': 64}
+2026-11-23 17:52:07,204 INFO    attempt 1 | mode=balanced diversity=0.1 genre=kept -> confidence high (98%); all checks passed
+2026-11-23 17:52:07,205 INFO    final | chose attempt 1 (balanced); status=needs_review
+2026-11-23 17:52:07,319 INFO    guard | accepted query (18 chars): 'asdfgh qwerty zxcv'
+2026-11-23 17:52:07,319 INFO    retrieve | no document scored above the relevance threshold
+2026-11-23 17:52:07,319 WARNING no relevant knowledge for query 'asdfgh qwerty zxcv'
+2026-11-23 17:52:07,440 WARNING rejected query: the request is empty; describe what you want to listen to

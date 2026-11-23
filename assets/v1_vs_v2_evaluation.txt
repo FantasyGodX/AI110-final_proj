@@ -1,0 +1,21 @@
+Configuration              P@5  Top-1  Genres  Artists  LowConf
+--------------------------------------------------------------
+v1 classic, 20 songs      0.54   1.00    4.10     4.70     1/10
+v1 classic, 40 songs      0.70   1.00    3.30     4.10     1/10
+balanced                  0.72   1.00    3.10     3.80     0/10
+balanced + diversity      0.70   1.00    3.50     4.20     0/10
+genre_first               0.68   1.00    2.70     3.60     1/10
+mood_first                0.66   1.00    4.00     4.40     0/10
+vibe_first                0.70   1.00    3.70     4.20     0/10
+
+Profile                           v1 classic  v1 classic    balanced  balanced +  genre_firs  mood_first  vibe_first
+Default Pop/Happy                       0.60        0.80        0.80        0.80        0.80        0.80        0.80
+High-Energy Pop                         0.60        0.40        0.40        0.40        0.40        0.60        0.60
+Chill Lofi                              0.80        1.00        1.00        1.00        1.00        0.80        1.00
+Deep Intense Rock                       0.60        0.80        0.80        0.60        0.80        0.60        0.60
+Quiet Acoustic Study                    0.60        0.60        0.80        0.80        0.80        0.80        0.80
+Workout EDM                             0.40        0.80        0.80        0.80        0.80        0.60        0.80
+Romantic Evening                        0.20        0.60        0.60        0.60        0.60        0.60        0.60
+Conflicting: high energy + sad          0.40        0.40        0.40        0.40        0.20        0.40        0.40
+Unknown genre (bossa nova)              0.40        0.80        0.80        0.80        0.80        0.80        0.80
+Mid-everything                          0.80        0.80        0.80        0.80        0.60        0.60        0.60

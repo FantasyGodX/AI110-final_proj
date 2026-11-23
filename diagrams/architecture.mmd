@@ -1,0 +1,40 @@
+flowchart TD
+    U(["User request<br/>plain language, or genre, mood and sliders"]) --> G{{"Guardrails<br/>empty, too long, wrong type, invalid k"}}
+    G -->|rejected| R1(["Clear message, nothing is guessed"])
+    G -->|accepted| RET["Retriever<br/>TF-IDF search"]
+
+    KB[("Knowledge base<br/>18 genre docs, 15 mood docs, 15 listening scenarios")] --> RET
+    CAT[("Song catalog<br/>40 songs")] -.->|computes genre and mood targets| KB
+
+    RET -->|nothing relevant| R2(["Ask the user to clarify"])
+    RET -->|top documents| CF{"Do the strongest sources conflict?"}
+    CF -->|yes| ONE["Keep only the best-matching document"]
+    CF -->|no| PROF
+    ONE --> PROF["Build taste profile from retrieved documents"]
+
+    PROF --> REC["Recommender<br/>scores 7 features, partial credit, diversity re-rank"]
+    CAT --> REC
+    REC --> CHK{"Self-check<br/>confidence, feature mismatch, repeated artist, k songs"}
+    CHK -->|pass| OUT
+    CHK -->|fail| REV["Revise strategy<br/>next mode, more diversity, drop genre guess"]
+    REV -->|max 3 attempts| REC
+    CHK -->|attempts used up| OUT
+
+    OUT(["Answer: recommendations, cited documents,<br/>score reasons, confidence, notes"])
+    OUT --> H[/"Human review<br/>read the trace and notes. Status needs_review asks for it"/]
+
+    LOG[("logs/vibefinder.log")]
+    G -.-> LOG
+    RET -.-> LOG
+    CHK -.-> LOG
+    REV -.-> LOG
+
+    subgraph TEST["Testing and evaluation"]
+        T1["pytest: 73 tests"]
+        T2["evaluate_agent.py<br/>retrieval accuracy, paraphrase stability, conflict detection, guardrails"]
+        T3["evaluate.py<br/>v1 vs v2 precision and diversity"]
+        T4["Hand-labelled relevant songs and documents<br/>human judgment"]
+    end
+    TEST -.-> RET
+    TEST -.-> REC
+    TEST -.-> CHK
